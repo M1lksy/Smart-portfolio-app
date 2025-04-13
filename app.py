@@ -11,6 +11,12 @@ tickers = ["AAPL", "MSFT", "GOOGL", "TSLA", "CBA.AX", "BHP.AX", "WES.AX", "CSL.A
 
 # Function to load fundamentals and price; using caching for speed
 @st.cache_data
+# TEMP TEST - Confirm yfinance works
+try:
+    test_data = yf.Ticker("AAPL").history(period="1d")
+    st.write("AAPL Test Data:", test_data)
+except Exception as e:
+    st.error(f"yfinance test failed: {e}")
 def get_fundamentals(tickers):
     data = []
     for ticker in tickers:
