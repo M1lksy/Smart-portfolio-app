@@ -1,45 +1,25 @@
 import streamlit as st
-import pandas as pd
 import requests
-from sklearn.preprocessing import MinMaxScaler
 
-st.title("Smart Portfolio: Value & Growth Picker")
+st.title("API Test: AAPL Data")
 
-investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
+api_key = "rrRi5vJI4MPAQIH2k00JkyAanMZTRQkv"
+url = f"https://financialmodelingprep.com/api/v3/profile/AAPL?apikey={api_key}"
 
-tickers = ["AAPL", "MSFT", "GOOGL", "TSLA"]
-fmp_key = "rrRi5vJI4MPAQIH2k00JkyAanMZTRQkv"
+try:
+    response = requests.get(url)
+    data = response.json()
 
-@st.cache_data
-def fetch_fundamentals(tickers, api_key):
-    fundamentals = []
-    for ticker in tickers:
-        try:
-            url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={api_key}"
-            res = requests.get(url)
-            data = res.json()
-            if isinstance(data, list) and data:
-                info = data[0]
-                fundamentals.append({
-                    "Ticker": ticker,
-                    "Name": info.get("companyName", ticker),
-                    "PE Ratio": info.get("peRatio", None),
-                    "PB Ratio": info.get("priceToBookRatio", None),
-                    "ROE": info.get("returnOnEquity", None),
-                    "Debt/Equity": info.get("debtToEquity", None),
-                    "EPS Growth": info.get("epsGrowth", None),
-                    "Price": info.get("price", None)
-                })
-        except Exception as e:
-            st.warning(f"Error loading {ticker}: {e}")
-    return pd.DataFrame(fundamentals)
+    if isinstance(data, list) and len(data) > 0:
+        profile = data[0]
+        name = profile.get("companyName", "N/A")
+        price = profile.get("price", "N/A")
 
-df = fetch_fundamentals(tickers, fmp_key)
+        st.success("Data fetched successfully!")
+        st.write(f"**Company Name:** {name}")
+        st.write(f"**Current Price:** ${price}")
+    else:
+        st.warning("API returned no usable data.")
 
-st.subheader("Raw Fundamental Data")
-st.dataframe(df)
-
-if df.empty:
-    st.warning("No data loaded into DataFrame.")
-    st.stop()
-
+except Exception as e:
+    st.error(f"Failed to fetch AAPL data: {e}")
