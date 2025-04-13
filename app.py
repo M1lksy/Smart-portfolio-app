@@ -1,33 +1,3 @@
-import streamlit as st
-import pandas as pd
-import requests
-from sklearn.preprocessing import MinMaxScaler
-
-# --- App title ---
-st.set_page_config(page_title="Smart Portfolio", layout="centered")
-st.title("Smart Portfolio: Value & Growth Picker")
-
-# --- Investment input ---
-investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
-
-# --- Stock pool selection ---
-market_choice = st.selectbox("Select Stock Market Pool", ["Mixed (US + AU)", "US Only", "AU Only"])
-
-# --- Define tickers based on user choice ---
-us_stocks = {
-    "AAPL": "Apple Inc.",
-    "MSFT": "Microsoft Corp.",
-    "GOOGL": "Alphabet Inc.",
-    "TSLA": "Tesla Inc."
-}
-
-au_stocks = {
-    "BHP.AX": "BHP Group",
-    "CBA.AX": "Commonwealth Bank",
-    "WES.AX": "Wesfarmers Ltd",
-    "CSL.AX": "CSL Limited"
-}
-
 if market_choice == "US Only":
     tickers = us_stocks
 elif market_choice == "AU Only":
@@ -100,8 +70,3 @@ buy_signals["Est. Shares"] = (buy_signals["Investment ($)"] / buy_signals["Price
 
 # --- Display ---
 st.subheader("Recommended Buy Signals")
-st.dataframe(buy_signals[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares"]])
-
-# --- CSV Download ---
-csv = buy_signals.to_csv(index=False)
-st.download_button("Download CSV", data=csv, file_name="buy_signals.csv", mime="text/csv")
