@@ -82,12 +82,38 @@ try:
     total_score = buy_signals["Score"].sum()
     buy_signals["Allocation %"] = buy_signals["Score"] / total_score
     buy_signals["Investment ($)"] = (buy_signals["Allocation %"] * investment_amount).round(2)
-    buy_signals["Est. Shares"] = (buy_signals["Investment ($)"] / buy_signals["Price"]).round(2)
+    buy_signals["Est. Shares"] = (buy_signals["Investment ($)"] / buy_signals["Price"]).fillna(0).astype(int)
 
     st.subheader("Buy Signals")
     st.dataframe(buy_signals[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares"]])
 
     csv = buy_signals.to_csv(index=False)
-    st.download_button("Download CSV", data=csv, file_name="buy_signals.csv", mime="text/csv")
+    st.download_button("Download Buy Signals", data=csv, file_name="buy_signals.csv", mime="text/csv")
+
+    # Rebalance Section
+    st.subheader("Rebalance Plan")
+    st.markdown("Enter your current holdings:")
+
+    rebalance_input = {}
+    for ticker in buy_signals["Ticker"]:
+        rebalance_input[ticker] = st.number_input(f"Current shares of {ticker}", min_value=0, value=0, step=1)
+
+    buy_signals["Current Shares"] = buy_signals["Ticker"].map(rebalance_input)
+    buy_signals["Target Shares"] = buy_signals["Est. Shares"]
+
+    def rebalance_action(current, target):
+        if current < target:
+            return f"BUY {target - current}"
+        elif current > target:
+            return f"SELL {current - target}"
+        else:
+            return "HOLD"
+
+    buy_signals["Action"] = buy_signals.apply(lambda row: rebalance_action(row["Current Shares"], row["Target Shares"]), axis=1)
+    st.dataframe(buy_signals[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]])
+
+    rebalance_csv = buy_signals[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]].to_csv(index=False)
+    st.download_button("Download Rebalance Plan", data=rebalance_csv, file_name="rebalance_plan.csv", mime="text/csv")
 except Exception as e:
     st.error(f"Error scoring or displaying data: {e}")
+
