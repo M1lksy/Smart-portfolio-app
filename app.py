@@ -3,104 +3,105 @@ import pandas as pd
 import requests
 from sklearn.preprocessing import MinMaxScaler
 
+# --- App title ---
+st.set_page_config(page_title="Smart Portfolio", layout="centered")
 st.title("Smart Portfolio: Value & Growth Picker")
+
+# --- Investment input ---
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 
-# Alpha Vantage API key
-API_KEY = "KH2BI58UOLUJYVX1"
+# --- Stock pool selection ---
+market_choice = st.selectbox("Select Stock Market Pool", ["Mixed (US + AU)", "US Only", "AU Only"])
 
-# Tickers to evaluate
-tickers = {
+# --- Define tickers based on user choice ---
+us_stocks = {
     "AAPL": "Apple Inc.",
     "MSFT": "Microsoft Corp.",
     "GOOGL": "Alphabet Inc.",
-    "TSLA": "Tesla Inc.",
-    "CBA.AX": "Commonwealth Bank",
+    "TSLA": "Tesla Inc."
+}
+
+au_stocks = {
     "BHP.AX": "BHP Group",
+    "CBA.AX": "Commonwealth Bank",
     "WES.AX": "Wesfarmers Ltd",
     "CSL.AX": "CSL Limited"
 }
 
-# Function to fetch fundamentals
+if market_choice == "US Only":
+    tickers = us_stocks
+elif market_choice == "AU Only":
+    tickers = au_stocks
+else:
+    tickers = {**us_stocks, **au_stocks}
+
+# --- FMP API Key ---
+API_KEY = "rrRi5vJI4MPAQIH2k00JkyAanMZTRQkv"
+
+# --- Function to fetch data from FMP ---
 @st.cache_data
 def get_fundamentals(tickers):
-    data = []
+    results = []
     for symbol, name in tickers.items():
         try:
-            url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={symbol}&apikey={API_KEY}"
+            url = f"https://financialmodelingprep.com/api/v3/profile/{symbol}?apikey={API_KEY}"
             r = requests.get(url)
-            if r.status_code != 200 or not r.text.startswith("{"):
-                st.warning(f"API issue for {symbol}")
+            if r.status_code != 200 or not r.json():
                 continue
-            info = r.json()
-            data.append({
+            info = r.json()[0]
+
+            metrics = {
                 "Ticker": symbol,
                 "Name": name,
-                "PE Ratio": float(info.get("PERatio", "nan")),
-                "PB Ratio": float(info.get("PriceToBookRatio", "nan")),
-                "ROE": float(info.get("ReturnOnEquityTTM", "nan")),
-                "Debt/Equity": float(info.get("DebtEquityRatio", "nan")),
-                "EPS Growth": float(info.get("QuarterlyEarningsGrowthYOY", "nan")),
-            })
+                "PE Ratio": float(info.get("pe", "nan")),
+                "PB Ratio": float(info.get("priceToBook", "nan")),
+                "ROE": float(info.get("returnOnEquity", "nan")),
+                "Debt/Equity": float(info.get("debtToEquity", "nan")),
+                "EPS Growth": float(info.get("eps", "nan")),
+                "Price": float(info.get("price", "nan"))
+            }
+            results.append(metrics)
         except Exception as e:
             st.warning(f"Error fetching {symbol}: {e}")
             continue
-    return pd.DataFrame(data)
+    return pd.DataFrame(results)
 
+# --- Load data ---
 df = get_fundamentals(tickers)
 
+# --- Check data ---
 if df.empty:
-    st.error("No data loaded into DataFrame.")
+    st.error("No stock data returned. Try switching markets or reloading.")
     st.stop()
 
-# Scoring Logic
-if not df.empty:
-    features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
-    features = features.fillna(features.mean(numeric_only=True))
+# --- Scoring ---
+features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
+features = features.fillna(features.mean(numeric_only=True))
+features["PE Ratio"] = 1 / features["PE Ratio"]
+features["PB Ratio"] = 1 / features["PB Ratio"]
+features["Debt/Equity"] = 1 / features["Debt/Equity"]
 
-    # Invert ratios where lower is better
-    features["PE Ratio"] = 1 / features["PE Ratio"]
-    features["PB Ratio"] = 1 / features["PB Ratio"]
-    features["Debt/Equity"] = 1 / features["Debt/Equity"]
+normalized = MinMaxScaler().fit_transform(features)
+df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-    # Normalize and calculate score
-    scaler = MinMaxScaler()
-    normalized = scaler.fit_transform(features)
-    df["Score"] = (normalized.mean(axis=1) * 100).round(2)
-
-    # Loosen filter to allow more results
-    buy_signals = df[df["Score"] >= 20].copy()
-    buy_signals = buy_signals.sort_values("Score", ascending=False)
-
-    # Allocate investment
-    total_score = buy_signals["Score"].sum()
-    buy_signals["Allocation %"] = buy_signals["Score"] / total_score
-    buy_signals["Investment ($)"] = (buy_signals["Allocation %"] * investment_amount).round(2)
-    buy_signals["Est. Shares"] = (buy_signals["Investment ($)"] / buy_signals["Price"]).round(2)
-
-    # Display table
-    st.subheader("Buy Signals")
-    st.dataframe(buy_signals[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares"]])
-
-    # CSV download
-    csv = buy_signals.to_csv(index=False)
-    st.download_button("Download CSV", data=csv, file_name="buy_signals.csv", mime="text/csv")
-else:
-    st.warning("No data fetched — API may be rate-limited or temporarily down.")
-
-# Filter buy signals
-buy_signals = df[(df["Score"] >= 40) & (df["PE Ratio"] < 25)].copy()
+# --- Filter buy signals ---
+buy_signals = df[df["Score"] >= 20].copy()
 buy_signals = buy_signals.sort_values("Score", ascending=False)
 
-# Allocations
+if buy_signals.empty:
+    st.warning("No qualifying stocks at this time.")
+    st.stop()
+
+# --- Allocation ---
 total_score = buy_signals["Score"].sum()
 buy_signals["Allocation %"] = buy_signals["Score"] / total_score
 buy_signals["Investment ($)"] = (buy_signals["Allocation %"] * investment_amount).round(2)
+buy_signals["Est. Shares"] = (buy_signals["Investment ($)"] / buy_signals["Price"]).round(2)
 
-# Display
-st.subheader("Buy Signals")
-st.dataframe(buy_signals[["Ticker", "Name", "Score", "Investment ($)"]])
+# --- Display ---
+st.subheader("Recommended Buy Signals")
+st.dataframe(buy_signals[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares"]])
 
-# Download
+# --- CSV Download ---
 csv = buy_signals.to_csv(index=False)
 st.download_button("Download CSV", data=csv, file_name="buy_signals.csv", mime="text/csv")
