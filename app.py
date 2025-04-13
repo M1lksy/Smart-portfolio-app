@@ -3,14 +3,12 @@ import pandas as pd
 import requests
 from sklearn.preprocessing import MinMaxScaler
 
-# Set up the page
 st.set_page_config(page_title="Smart Portfolio", layout="centered")
 st.title("Smart Portfolio: Value & Growth Picker")
 
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
-market_choice = st.selectbox("Select Stock Market Pool", ["Mixed (US + AU)", "US Only", "AU Only"])
+market_choice = st.selectbox("Select Stock Market Pool", ["US Only", "AU Only", "Mixed (US + AU)"])
 
-# Stock pools
 us_stocks = {
     "AAPL": "Apple Inc.",
     "MSFT": "Microsoft Corp.",
@@ -35,35 +33,39 @@ else:
 API_KEY = "rrRi5vJI4MPAQIH2k00JkyAanMZTRQkv"
 
 @st.cache_data
-def get_fundamentals(tickers):
-    results = []
-    for symbol, name in tickers.items():
+def get_fundamentals(ticker_dict):
+    all_data = []
+    for symbol, name in ticker_dict.items():
         try:
-            url = f"https://financialmodelingprep.com/api/v3/profile/{symbol}?apikey={API_KEY}"
-            r = requests.get(url)
-            if r.status_code != 200 or not r.json():
-                continue
-            info = r.json()[0]
-            results.append({
+            profile_url = f"https://financialmodelingprep.com/api/v3/profile/{symbol}?apikey={API_KEY}"
+            ratios_url = f"https://financialmodelingprep.com/api/v3/ratios-ttm/{symbol}?apikey={API_KEY}"
+            growth_url = f"https://financialmodelingprep.com/api/v3/financial-growth/{symbol}?apikey={API_KEY}"
+
+            profile = requests.get(profile_url).json()
+            ratios = requests.get(ratios_url).json()
+            growth = requests.get(growth_url).json()
+
+            data = {
                 "Ticker": symbol,
                 "Name": name,
-                "PE Ratio": float(info.get("pe", "nan")),
-                "PB Ratio": float(info.get("priceToBook", "nan")),
-                "ROE": float(info.get("returnOnEquity", "nan")),
-                "Debt/Equity": float(info.get("debtToEquity", "nan")),
-                "EPS Growth": float(info.get("eps", "nan")),
-                "Price": float(info.get("price", "nan"))
-            })
+                "PE Ratio": float(ratios[0].get("peRatioTTM", "nan")) if ratios else None,
+                "PB Ratio": float(ratios[0].get("priceToBookRatioTTM", "nan")) if ratios else None,
+                "ROE": float(ratios[0].get("returnOnEquityTTM", "nan")) if ratios else None,
+                "Debt/Equity": float(ratios[0].get("debtEquityRatioTTM", "nan")) if ratios else None,
+                "EPS Growth": float(growth[0].get("epsgrowth", "nan")) if growth else None,
+                "Price": float(profile[0].get("price", "nan")) if profile else None
+            }
+            all_data.append(data)
         except Exception as e:
-            st.warning(f"Error loading {symbol}: {e}")
-    return pd.DataFrame(results)
+            st.warning(f"Error fetching data for {symbol}: {e}")
+    return pd.DataFrame(all_data)
 
 df = get_fundamentals(tickers)
-st.subheader("Raw Fundamental Data")
+st.subheader("Raw Data")
 st.dataframe(df)
 
 if df.empty:
-    st.error("No stock data returned.")
+    st.error("No data available. Try a different stock pool or check API.")
     st.stop()
 
 try:
@@ -88,4 +90,4 @@ try:
     csv = buy_signals.to_csv(index=False)
     st.download_button("Download CSV", data=csv, file_name="buy_signals.csv", mime="text/csv")
 except Exception as e:
-    st.error(f"Error in scoring or display: {e}")
+    st.error(f"Error scoring or displaying data: {e}")
