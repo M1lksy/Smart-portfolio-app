@@ -16,6 +16,8 @@ def get_fundamentals(tickers):
     for ticker in tickers:
         try:
             info = yf.Ticker(ticker).info
+            price = yf.Ticker(ticker).history(period="1d")
+            st.write(f"Fetched: {ticker}, Price rows: {len(price)}")
             data.append({
                 "Ticker": ticker,
                 "Name": info.get("shortName", ""),
@@ -24,9 +26,10 @@ def get_fundamentals(tickers):
                 "ROE": info.get("returnOnEquity", None),
                 "Debt/Equity": info.get("debtToEquity", None),
                 "EPS Growth": info.get("earningsQuarterlyGrowth", None),
-                "Price": yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]
+                "Price": price["Close"].iloc[-1] if not price.empty else None
             })
         except Exception as e:
+            st.warning(f"Error fetching {ticker}: {e}")
             continue
     return pd.DataFrame(data)
 
