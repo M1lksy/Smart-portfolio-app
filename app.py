@@ -1,72 +1,45 @@
-if market_choice == "US Only":
-    tickers = us_stocks
-elif market_choice == "AU Only":
-    tickers = au_stocks
-else:
-    tickers = {**us_stocks, **au_stocks}
+import streamlit as st
+import pandas as pd
+import requests
+from sklearn.preprocessing import MinMaxScaler
 
-# --- FMP API Key ---
-API_KEY = "rrRi5vJI4MPAQIH2k00JkyAanMZTRQkv"
+st.title("Smart Portfolio: Value & Growth Picker")
 
-# --- Function to fetch data from FMP ---
+investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
+
+tickers = ["AAPL", "MSFT", "GOOGL", "TSLA"]
+fmp_key = "rrRi5vJI4MPAQIH2k00JkyAanMZTRQkv"
+
 @st.cache_data
-def get_fundamentals(tickers):
-    results = []
-    for symbol, name in tickers.items():
+def fetch_fundamentals(tickers, api_key):
+    fundamentals = []
+    for ticker in tickers:
         try:
-            url = f"https://financialmodelingprep.com/api/v3/profile/{symbol}?apikey={API_KEY}"
-            r = requests.get(url)
-            if r.status_code != 200 or not r.json():
-                continue
-            info = r.json()[0]
-
-            metrics = {
-                "Ticker": symbol,
-                "Name": name,
-                "PE Ratio": float(info.get("pe", "nan")),
-                "PB Ratio": float(info.get("priceToBook", "nan")),
-                "ROE": float(info.get("returnOnEquity", "nan")),
-                "Debt/Equity": float(info.get("debtToEquity", "nan")),
-                "EPS Growth": float(info.get("eps", "nan")),
-                "Price": float(info.get("price", "nan"))
-            }
-            results.append(metrics)
+            url = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={api_key}"
+            res = requests.get(url)
+            data = res.json()
+            if isinstance(data, list) and data:
+                info = data[0]
+                fundamentals.append({
+                    "Ticker": ticker,
+                    "Name": info.get("companyName", ticker),
+                    "PE Ratio": info.get("peRatio", None),
+                    "PB Ratio": info.get("priceToBookRatio", None),
+                    "ROE": info.get("returnOnEquity", None),
+                    "Debt/Equity": info.get("debtToEquity", None),
+                    "EPS Growth": info.get("epsGrowth", None),
+                    "Price": info.get("price", None)
+                })
         except Exception as e:
-            st.warning(f"Error fetching {symbol}: {e}")
-            continue
-    return pd.DataFrame(results)
+            st.warning(f"Error loading {ticker}: {e}")
+    return pd.DataFrame(fundamentals)
 
-# --- Load data ---
-df = get_fundamentals(tickers)
+df = fetch_fundamentals(tickers, fmp_key)
 
-# --- Check data ---
+st.subheader("Raw Fundamental Data")
+st.dataframe(df)
+
 if df.empty:
-    st.error("No stock data returned. Try switching markets or reloading.")
+    st.warning("No data loaded into DataFrame.")
     st.stop()
 
-# --- Scoring ---
-features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
-features = features.fillna(features.mean(numeric_only=True))
-features["PE Ratio"] = 1 / features["PE Ratio"]
-features["PB Ratio"] = 1 / features["PB Ratio"]
-features["Debt/Equity"] = 1 / features["Debt/Equity"]
-
-normalized = MinMaxScaler().fit_transform(features)
-df["Score"] = (normalized.mean(axis=1) * 100).round(2)
-
-# --- Filter buy signals ---
-buy_signals = df[(df["Score"] >= 0)].copy()
-buy_signals = buy_signals.sort_values("Score", ascending=False)
-
-if buy_signals.empty:
-    st.warning("No qualifying stocks at this time.")
-    st.stop()
-
-# --- Allocation ---
-total_score = buy_signals["Score"].sum()
-buy_signals["Allocation %"] = buy_signals["Score"] / total_score
-buy_signals["Investment ($)"] = (buy_signals["Allocation %"] * investment_amount).round(2)
-buy_signals["Est. Shares"] = (buy_signals["Investment ($)"] / buy_signals["Price"]).round(2)
-
-# --- Display ---
-st.subheader("Recommended Buy Signals")
