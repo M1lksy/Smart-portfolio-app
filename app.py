@@ -1,3 +1,10 @@
+# Check if required columns exist
+required_cols = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]
+missing_cols = [col for col in required_cols if col not in df.columns]
+
+if missing_cols:
+    st.error(f"Missing columns in data: {', '.join(missing_cols)}")
+    st.stop()
 import streamlit as st
 import pandas as pd
 import yfinance as yf
