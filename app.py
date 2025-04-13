@@ -85,7 +85,7 @@ normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
 # --- Filter buy signals ---
-buy_signals = df[df["Score"] >= 20].copy()
+buy_signals = df[(df["Score"] >= 0)].copy()
 buy_signals = buy_signals.sort_values("Score", ascending=False)
 
 if buy_signals.empty:
