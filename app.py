@@ -53,14 +53,40 @@ if df.empty:
     st.error("No data loaded into DataFrame.")
     st.stop()
 
-# Scoring logic
-features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
-features = features.fillna(features.mean())
-features["PE Ratio"] = 1 / features["PE Ratio"]
-features["PB Ratio"] = 1 / features["PB Ratio"]
-features["Debt/Equity"] = 1 / features["Debt/Equity"]
-normalized = MinMaxScaler().fit_transform(features)
-df["Score"] = (normalized.mean(axis=1) * 100).round(2)
+# Scoring Logic
+if not df.empty:
+    features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
+    features = features.fillna(features.mean(numeric_only=True))
+
+    # Invert ratios where lower is better
+    features["PE Ratio"] = 1 / features["PE Ratio"]
+    features["PB Ratio"] = 1 / features["PB Ratio"]
+    features["Debt/Equity"] = 1 / features["Debt/Equity"]
+
+    # Normalize and calculate score
+    scaler = MinMaxScaler()
+    normalized = scaler.fit_transform(features)
+    df["Score"] = (normalized.mean(axis=1) * 100).round(2)
+
+    # Loosen filter to allow more results
+    buy_signals = df[df["Score"] >= 20].copy()
+    buy_signals = buy_signals.sort_values("Score", ascending=False)
+
+    # Allocate investment
+    total_score = buy_signals["Score"].sum()
+    buy_signals["Allocation %"] = buy_signals["Score"] / total_score
+    buy_signals["Investment ($)"] = (buy_signals["Allocation %"] * investment_amount).round(2)
+    buy_signals["Est. Shares"] = (buy_signals["Investment ($)"] / buy_signals["Price"]).round(2)
+
+    # Display table
+    st.subheader("Buy Signals")
+    st.dataframe(buy_signals[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares"]])
+
+    # CSV download
+    csv = buy_signals.to_csv(index=False)
+    st.download_button("Download CSV", data=csv, file_name="buy_signals.csv", mime="text/csv")
+else:
+    st.warning("No data fetched — API may be rate-limited or temporarily down.")
 
 # Filter buy signals
 buy_signals = df[(df["Score"] >= 40) & (df["PE Ratio"] < 25)].copy()
