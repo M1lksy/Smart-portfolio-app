@@ -39,6 +39,17 @@ def get_fundamentals(tickers):
 
 df = get_fundamentals(tickers)
 
+# Check if required columns exist
+if not df.empty:
+    required_cols = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+
+    if missing_cols:
+        st.error(f"Missing columns in data: {', '.join(missing_cols)}")
+        st.stop()
+else:
+    st.error("No data loaded into DataFrame.")
+    st.stop()
 # Scoring Logic
 features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
 features = features.fillna(features.mean())
