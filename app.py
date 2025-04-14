@@ -53,8 +53,17 @@ df = fetch_fundamentals(tickers)
 st.subheader("Raw Data")
 st.dataframe(df)
 
-df = df.dropna(subset=["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Price"])
+# --- Check if required columns exist ---
+required_cols = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Price"]
+missing_cols = [col for col in required_cols if col not in df.columns]
 
+if missing_cols:
+    st.warning(f"Missing required data columns: {', '.join(missing_cols)}")
+    st.stop()
+else:
+    df = df.dropna(subset=required_cols)
+
+# --- Scoring Logic ---
 features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
 features["PE Ratio"] = 1 / features["PE Ratio"]
 features["PB Ratio"] = 1 / features["PB Ratio"]
@@ -64,9 +73,11 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
+# --- Filter Buy Signals ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 
+# --- Allocate and Estimate Shares ---
 total_score = buy_df["Score"].sum()
 buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
@@ -79,44 +90,3 @@ if not buy_df.empty:
     st.download_button("Download Buy Signals CSV", data=csv, file_name="buy_signals.csv", mime="text/csv")
 else:
     st.warning("No qualifying stocks at this time.")
-
-# Projected Wealth
-st.subheader("Projected Wealth Calculator")
-years = st.slider("Years to Project", 1, 40, 10)
-expected_return = st.slider("Expected Annual Return (%)", 1, 15, 7)
-contribution = st.number_input("Fortnightly Contribution ($)", value=500, step=50)
-
-future_value = 0
-for i in range(years * 26):
-    future_value = (future_value + contribution) * (1 + (expected_return / 100) / 26)
-future_value = round(future_value, 2)
-
-st.success(f"Projected Wealth in {years} years: ${future_value:,}")
-
-# Rebalance Logic
-st.subheader("Rebalance Plan")
-st.write("Enter your current holdings:")
-
-current_shares = {}
-for ticker in buy_df["Ticker"]:
-    current_shares[ticker] = st.number_input(f"Current shares of {ticker}", min_value=0, step=1, key=ticker)
-
-rebalance_df = buy_df.copy()
-rebalance_df["Current Shares"] = rebalance_df["Ticker"].map(current_shares)
-rebalance_df["Target Shares"] = rebalance_df["Est. Shares"]
-
-def decide_action(current, target):
-    if current < target:
-        return f"BUY {target - current}"
-    elif current > target:
-        return f"SELL {current - target}"
-    else:
-        return "HOLD"
-
-rebalance_df["Action"] = rebalance_df.apply(
-    lambda row: decide_action(row["Current Shares"], row["Target Shares"]), axis=1
-)
-
-st.dataframe(rebalance_df[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]])
-rebalance_csv = rebalance_df[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]].to_csv(index=False)
-st.download_button("Download Rebalance Plan", data=rebalance_csv, file_name="rebalance_plan.csv", mime="text/csv")
