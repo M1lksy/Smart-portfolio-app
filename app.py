@@ -67,6 +67,9 @@ if missing:
 
 # Drop rows missing required values
 df = df.dropna(subset=required)
+if df.empty:
+    st.warning("No stocks have sufficient data to analyze. Try fewer tickers or wait for API reset.")
+    st.stop()
 
 # Scoring setup
 features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
@@ -74,7 +77,9 @@ features["PE Ratio"] = 1 / features["PE Ratio"]
 features["PB Ratio"] = 1 / features["PB Ratio"]
 features["Debt/Equity"] = 1 / features["Debt/Equity"]
 features = features.fillna(features.mean())
-
+if features.empty:
+    st.warning("No valid data available to score stocks. Please try again later or check your API limits.")
+    st.stop()
 # Normalize and score
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
