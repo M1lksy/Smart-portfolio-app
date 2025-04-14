@@ -163,3 +163,26 @@ for i, row in buy_df.iterrows():
                     st.markdown(f"- [{title}]({url})")
         else:
             st.write("No recent news available.")
+            # --- Force Dark Theme (CSS Override) ---
+dark_mode_css = """
+    <style>
+        .stApp {
+            background-color: #0E1117;
+            color: white;
+        }
+        .stButton>button {
+            color: white;
+        }
+        .stTextInput>div>div>input {
+            background-color: #1E222A;
+            color: white;
+        }
+        .stSlider>div>div>div {
+            background-color: #1E222A;
+        }
+        .stDataFrame {
+            background-color: #1E222A;
+        }
+    </style>
+"""
+st.markdown(dark_mode_css, unsafe_allow_html=True)
