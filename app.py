@@ -26,22 +26,20 @@ TICKERS = {
     "Mixed (US + AU)": ["AAPL", "MSFT", "GOOGL", "TSLA", "BHP.AX", "WES.AX", "CSL.AX", "CBA.AX"]
 }
 tickers = TICKERS[market_pool]
+
 @st.cache_data
 def fetch_fundamentals(ticker_list):
     results = []
     for symbol in ticker_list:
-        used_fallback = False
-
         try:
-            # --- Finnhub (Primary Source) ---
-            profile = requests.get(f"https://finnhub.io/api/v1/stock/profile2?symbol={symbol}&token={FINNHUB_KEY}").json()
-            metrics = requests.get(f"https://finnhub.io/api/v1/stock/metric?symbol={symbol}&metric=all&token={FINNHUB_KEY}").json().get("metric", {})
-            quote = requests.get(f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={FINNHUB_KEY}").json()
-            news = requests.get(f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from=2024-01-01&to=2025-01-01&token={FINNHUB_KEY}").json()
+            profile = requests.get(f"{FINNHUB_BASE}/stock/profile2?symbol={symbol}&token={FINNHUB_KEY}").json()
+            metrics = requests.get(f"{FINNHUB_BASE}/stock/metric?symbol={symbol}&metric=all&token={FINNHUB_KEY}").json().get("metric", {})
+            quote = requests.get(f"{FINNHUB_BASE}/quote?symbol={symbol}&token={FINNHUB_KEY}").json()
+            news = requests.get(f"{FINNHUB_BASE}/company-news?symbol={symbol}&from=2024-01-01&to=2025-01-01&token={FINNHUB_KEY}").json()
 
             if not all([profile.get("name"), metrics.get("peNormalizedAnnual"), quote.get("c")]):
-                raise ValueError("Missing core metrics")
-            
+                raise ValueError("Missing Finnhub data")
+
             results.append({
                 "Ticker": symbol,
                 "Name": profile.get("name"),
@@ -57,7 +55,6 @@ def fetch_fundamentals(ticker_list):
 
         except Exception:
             try:
-                # --- Alpha Vantage Fallback ---
                 overview = requests.get(f"{ALPHA_BASE}?function=OVERVIEW&symbol={symbol}&apikey={ALPHA_KEY}").json()
                 quote = requests.get(f"{ALPHA_BASE}?function=GLOBAL_QUOTE&symbol={symbol}&apikey={ALPHA_KEY}").json()
                 price = float(quote.get("Global Quote", {}).get("05. price", 0))
@@ -80,18 +77,16 @@ def fetch_fundamentals(ticker_list):
     return pd.DataFrame(results)
 
 df = fetch_fundamentals(tickers)
-# --- Display Raw Data ---
+
+# --- Clean and Filter Data ---
+required = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Price"]
+df = df.dropna(subset=required)
+
 st.subheader("Raw Data")
 st.dataframe(df)
 
-required = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Price"]
-if df.empty or not all(col in df.columns for col in required):
-    st.warning("Missing or incomplete data. Try again later or reduce ticker count.")
-    st.stop()
-
-df = df.dropna(subset=required)
 if df.empty:
-    st.warning("No stocks have complete data. Try again later.")
+    st.warning("No stocks have complete data. Try again later or reduce ticker count.")
     st.stop()
 
 # --- Scoring ---
@@ -117,14 +112,15 @@ buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
 buy_df["Est. Shares"] = (buy_df["Investment ($)"] / buy_df["Price"]).fillna(0).astype(int)
 
-# --- Display Buy Signals ---
+# --- Buy Signals Display ---
 st.subheader("Buy Signals")
 if not buy_df.empty:
     st.dataframe(buy_df[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares", "Source"]])
     st.download_button("Download Buy Signals", data=buy_df.to_csv(index=False), file_name="buy_signals.csv", mime="text/csv")
 else:
     st.warning("No qualifying stocks at this time.")
-    # --- Rebalancing Section ---
+
+# --- Rebalancing Section ---
 st.subheader("Rebalance Plan")
 st.markdown("Enter your current holdings:")
 
@@ -162,23 +158,23 @@ for year in range(1, years + 1):
 df_growth = pd.DataFrame(history, columns=["Year", "Projected Wealth ($)"])
 st.line_chart(df_growth.set_index("Year"))
 st.success(f"Projected portfolio in {years} years: ${df_growth.iloc[-1]['Projected Wealth ($)']:,.2f}")
-# --- News by Stock ---
-st.subheader("Latest News by Stock")
 
-for i, row in buy_df.iterrows():
-    news_items = row.get("News", [])
-    with st.expander(f"{row['Ticker']} - News"):
-        if isinstance(news_items, list) and news_items:
-            for article in news_items:
-                title = article.get("headline") or article.get("title", "No Title")
-                url = article.get("url", "")
-                source = article.get("source", "")
+# --- News Section ---
+st.subheader("Latest News by Stock")
+for _, row in buy_df.iterrows():
+    with st.expander(f"{row['Ticker']} News"):
+        articles = row.get("News", [])
+        if isinstance(articles, list) and articles:
+            for article in articles:
+                title = article.get("headline") or article.get("title")
+                url = article.get("url")
                 if title and url:
-                    st.markdown(f"- [{title}]({url})  `{source}`")
+                    st.markdown(f"- [{title}]({url})")
         else:
-            st.markdown("No news available.")
-# --- Dark Theme Override ---
-dark_mode_css = """
+            st.write("No recent news available.")
+
+# --- Dark Mode Style ---
+st.markdown("""
 <style>
     .stApp {
         background-color: #0E1117;
@@ -187,7 +183,7 @@ dark_mode_css = """
     .stButton>button {
         color: white;
     }
-    .stTextInput>div>div>input {
+    .stTextInput>div>div>input, .stNumberInput>div>div>input {
         background-color: #1E222A;
         color: white;
     }
@@ -198,23 +194,4 @@ dark_mode_css = """
         background-color: #1E222A;
     }
 </style>
-"""
-st.markdown(dark_mode_css, unsafe_allow_html=True)
-st.markdown(
-    """
-    <style>
-        html, body, [class*="css"] {
-            background-color: #0E1117 !important;
-            color: white !important;
-        }
-        .stDataFrame {
-            background-color: #1E222A !important;
-            color: white !important;
-        }
-        .stApp {
-            background-color: #0E1117 !important;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
