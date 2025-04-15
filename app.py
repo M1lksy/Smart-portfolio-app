@@ -166,17 +166,17 @@ st.success(f"Projected portfolio in {years} years: ${df_growth.iloc[-1]['Project
 st.subheader("Latest News by Stock")
 
 for i, row in buy_df.iterrows():
-    with st.expander(f"{row['Ticker']} News"):
-        articles = row.get("News", [])
-        if articles:
-            for article in articles:
-                title = article.get("headline") or article.get("title", "No title")
-                url = article.get("url")
+    news_items = row.get("News", [])
+    with st.expander(f"{row['Ticker']} - News"):
+        if isinstance(news_items, list) and news_items:
+            for article in news_items:
+                title = article.get("headline") or article.get("title", "No Title")
+                url = article.get("url", "")
+                source = article.get("source", "")
                 if title and url:
-                    st.markdown(f"- [{title}]({url})")
+                    st.markdown(f"- [{title}]({url})  `{source}`")
         else:
-            st.write("No recent news available.")
-
+            st.markdown("No news available.")
 # --- Dark Theme Override ---
 dark_mode_css = """
 <style>
@@ -200,3 +200,21 @@ dark_mode_css = """
 </style>
 """
 st.markdown(dark_mode_css, unsafe_allow_html=True)
+st.markdown(
+    """
+    <style>
+        html, body, [class*="css"] {
+            background-color: #0E1117 !important;
+            color: white !important;
+        }
+        .stDataFrame {
+            background-color: #1E222A !important;
+            color: white !important;
+        }
+        .stApp {
+            background-color: #0E1117 !important;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
