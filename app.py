@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 from sklearn.preprocessing import MinMaxScaler
-import datetime
 import yfinance as yf
 
 st.set_page_config(layout="wide", page_title="Smart Portfolio")
@@ -12,7 +11,7 @@ FINNHUB_KEY = "cvud0p9r01qjg1391glgcvud0p9r01qjg1391gm0"
 ALPHA_KEY = "TPIRYXKQ80UVEUPR"
 TIINGO_KEY = "9477b5815b1ab7e5283843beec9d0b4c152025d1"
 
-# --- UI ---
+# --- UI Inputs ---
 st.title("Smart Portfolio: Value & Growth Picker")
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 lump_sum = st.number_input("Initial Lump Sum ($)", value=10000, step=500)
@@ -20,6 +19,7 @@ years = st.slider("Years to Project", 1, 40, 20)
 expected_return = st.slider("Expected Annual Return (%)", 1, 15, 7)
 market_pool = st.selectbox("Select Market Pool", ["US Only", "AU Only", "Mixed (US + AU)"])
 
+# --- Ticker Pools ---
 TICKERS = {
     "US Only": ["AAPL", "MSFT", "GOOGL", "TSLA"],
     "AU Only": ["BHP.AX", "WES.AX", "CSL.AX", "CBA.AX"],
@@ -28,7 +28,7 @@ TICKERS = {
 tickers = TICKERS[market_pool]
 
 SECTOR_MAP = {
-    "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Communication Services", "TSLA": "Consumer Cyclical",
+    "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Communication", "TSLA": "Consumer Cyclical",
     "BHP.AX": "Materials", "WES.AX": "Consumer Defensive", "CSL.AX": "Healthcare", "CBA.AX": "Financials"
 }
 @st.cache_data
@@ -41,7 +41,12 @@ def fetch_stock_data(ticker):
         profile = requests.get(f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_KEY}").json()
         metrics = requests.get(f"https://finnhub.io/api/v1/stock/metric?symbol={ticker}&metric=all&token={FINNHUB_KEY}").json().get("metric", {})
         quote = requests.get(f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_KEY}").json()
-        news = requests.get(f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2024-01-01&to=2025-01-01&token={FINNHUB_KEY}").json()
+        raw_news = requests.get(f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2024-01-01&to=2025-01-01&token={FINNHUB_KEY}").json()
+
+        clean_news = []
+        for n in raw_news[:5]:
+            if "headline" in n and "url" in n:
+                clean_news.append({"title": n["headline"], "url": n["url"]})
 
         data.update({
             "Name": profile.get("name", ""),
@@ -51,12 +56,12 @@ def fetch_stock_data(ticker):
             "Debt/Equity": metrics.get("totalDebt/totalEquityAnnual"),
             "EPS Growth": metrics.get("epsGrowth"),
             "Price": quote.get("c"),
-            "News": news[:5]
+            "News": clean_news
         })
         data["Source"].append("Finnhub")
     except: pass
 
-    # --- Tiingo Fallback ---
+    # --- Tiingo ---
     try:
         tiingo_url = f"https://api.tiingo.com/tiingo/daily/{ticker.replace('.AX','')}/fundamentals?token={TIINGO_KEY}"
         tiingo = requests.get(tiingo_url).json()
@@ -70,7 +75,7 @@ def fetch_stock_data(ticker):
             data["Source"].append("Tiingo")
     except: pass
 
-    # --- Alpha Vantage Fallback ---
+    # --- Alpha Vantage ---
     try:
         overview = requests.get(f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_KEY}").json()
         quote = requests.get(f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={ALPHA_KEY}").json()
@@ -103,11 +108,11 @@ def build_dataframe(ticker_list):
     return pd.DataFrame(rows)
 
 df = build_dataframe(tickers)
-# --- Data Preview & Filtering ---
+# --- Clean Display ---
 st.subheader("Raw Stock Data (partial data allowed)")
 st.dataframe(df)
 
-# --- Scoring Logic (Partial fields allowed) ---
+# --- Score Calculation ---
 features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
 features["PE Ratio"] = 1 / features["PE Ratio"]
 features["PB Ratio"] = 1 / features["PB Ratio"]
@@ -116,7 +121,7 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-# --- Buy Recommendations ---
+# --- Buy Signal Logic ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 total_score = buy_df["Score"].sum()
@@ -124,19 +129,36 @@ buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
 buy_df["Est. Shares"] = (buy_df["Investment ($)"] / buy_df["Price"]).fillna(0).astype(int)
 
-# --- Display Buy Signals ---
+# --- Buy Signal Display ---
 st.subheader("Buy Signals")
 if not buy_df.empty:
     st.dataframe(buy_df[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares", "Sector", "Source"]])
     st.download_button("Download Buy Signals", data=buy_df.to_csv(index=False), file_name="buy_signals.csv", mime="text/csv")
 else:
-    st.warning("No qualifying stocks at this time.")
+    st.warning("No qualifying stocks at this time based on available data.")
 
-# --- Sector Breakdown ---
+# --- Sector View ---
 st.subheader("Sector Diversification")
-sector_counts = buy_df["Sector"].value_counts()
-st.bar_chart(sector_counts)
-# --- Rebalancing Section ---
+if not buy_df.empty:
+    sector_counts = buy_df["Sector"].value_counts()
+    st.bar_chart(sector_counts)
+
+# --- Backtest Chart ---
+st.subheader("Backtest: 5-Year Price Trend")
+try:
+    price_data = {}
+    for t in buy_df["Ticker"]:
+        try:
+            hist = yf.download(t, period="5y")["Adj Close"]
+            price_data[t] = hist
+        except: continue
+    if price_data:
+        st.line_chart(pd.DataFrame(price_data))
+    else:
+        st.warning("No historical price data available for these stocks.")
+except:
+    st.warning("Unable to load backtest chart. Please try again later.")
+    # --- Rebalancing Plan ---
 st.subheader("Rebalance Plan")
 current_shares = {}
 for ticker in buy_df["Ticker"]:
@@ -145,19 +167,19 @@ for ticker in buy_df["Ticker"]:
 buy_df["Current Shares"] = buy_df["Ticker"].map(current_shares)
 buy_df["Target Shares"] = buy_df["Est. Shares"]
 
-def decide_action(current, target):
-    if current < target:
-        return f"BUY {target - current}"
-    elif current > target:
-        return f"SELL {current - target}"
-    return "HOLD"
+def decide_action(cur, target):
+    if cur < target:
+        return f"BUY {target - cur}"
+    elif cur > target:
+        return f"SELL {cur - target}"
+    else:
+        return "HOLD"
 
 buy_df["Action"] = buy_df.apply(lambda row: decide_action(row["Current Shares"], row["Target Shares"]), axis=1)
 st.dataframe(buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]])
-rebalance_csv = buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]].to_csv(index=False)
-st.download_button("Download Rebalance Plan", data=rebalance_csv, file_name="rebalance_plan.csv", mime="text/csv")
+st.download_button("Download Rebalance Plan", data=buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]].to_csv(index=False), file_name="rebalance_plan.csv", mime="text/csv")
 
-# --- Projected Wealth ---
+# --- Projected Wealth Calculator ---
 st.subheader("Projected Wealth Calculator")
 contribution = st.number_input("Fortnightly Contribution ($)", value=500, step=50)
 
@@ -179,33 +201,14 @@ for _, row in buy_df.iterrows():
         articles = row.get("News", [])
         if isinstance(articles, list) and articles:
             for article in articles:
-                title = article.get("headline") or article.get("title")
+                title = article.get("title")
                 url = article.get("url")
                 if title and url:
                     st.markdown(f"- [{title}]({url})")
         else:
             st.write("No recent news available.")
-# --- Historical Backtesting ---
-st.subheader("Backtest: Score vs. Price (5-Year View)")
 
-def backtest_scores(ticker_list):
-    price_data = {}
-    for t in ticker_list:
-        try:
-            df_hist = yf.download(t, period="5y")["Adj Close"]
-            price_data[t] = df_hist
-        except:
-            continue
-    return pd.DataFrame(price_data)
-
-price_df = backtest_scores(buy_df["Ticker"])
-if not price_df.empty:
-    st.line_chart(price_df)
-    st.caption("5-year price history for current buy signals.")
-else:
-    st.warning("Unable to retrieve price history for selected stocks.")
-
-# --- Final Dark Mode ---
+# --- Final Dark Theme ---
 st.markdown("""
 <style>
 html, body, [class*="css"] {
