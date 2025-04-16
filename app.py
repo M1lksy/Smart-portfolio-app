@@ -11,7 +11,7 @@ FINNHUB_KEY = "cvud0p9r01qjg1391glgcvud0p9r01qjg1391gm0"
 ALPHA_KEY = "TPIRYXKQ80UVEUPR"
 TIINGO_KEY = "9477b5815b1ab7e5283843beec9d0b4c152025d1"
 
-# --- UI Inputs ---
+# --- UI Setup ---
 st.title("Smart Portfolio: Value & Growth Picker")
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 lump_sum = st.number_input("Initial Lump Sum ($)", value=10000, step=500)
@@ -19,7 +19,6 @@ years = st.slider("Years to Project", 1, 40, 20)
 expected_return = st.slider("Expected Annual Return (%)", 1, 15, 7)
 market_pool = st.selectbox("Select Market Pool", ["US Only", "AU Only", "Mixed (US + AU)"])
 
-# --- Ticker Pools ---
 TICKERS = {
     "US Only": ["AAPL", "MSFT", "GOOGL", "TSLA"],
     "AU Only": ["BHP.AX", "WES.AX", "CSL.AX", "CBA.AX"],
@@ -108,11 +107,11 @@ def build_dataframe(ticker_list):
     return pd.DataFrame(rows)
 
 df = build_dataframe(tickers)
-# --- Clean Display ---
-st.subheader("Raw Stock Data (partial data allowed)")
+# --- Clean Data Table ---
+st.subheader("Raw Stock Data")
 st.dataframe(df)
 
-# --- Score Calculation ---
+# --- Scoring ---
 features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
 features["PE Ratio"] = 1 / features["PE Ratio"]
 features["PB Ratio"] = 1 / features["PB Ratio"]
@@ -121,7 +120,7 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-# --- Buy Signal Logic ---
+# --- Buy Signals ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 total_score = buy_df["Score"].sum()
@@ -129,15 +128,15 @@ buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
 buy_df["Est. Shares"] = (buy_df["Investment ($)"] / buy_df["Price"]).fillna(0).astype(int)
 
-# --- Buy Signal Display ---
+# --- Buy Signals Table ---
 st.subheader("Buy Signals")
 if not buy_df.empty:
     st.dataframe(buy_df[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares", "Sector", "Source"]])
     st.download_button("Download Buy Signals", data=buy_df.to_csv(index=False), file_name="buy_signals.csv", mime="text/csv")
 else:
-    st.warning("No qualifying stocks at this time based on available data.")
+    st.warning("No qualifying stocks at this time.")
 
-# --- Sector View ---
+# --- Sector Diversification ---
 st.subheader("Sector Diversification")
 if not buy_df.empty:
     sector_counts = buy_df["Sector"].value_counts()
@@ -151,14 +150,15 @@ try:
         try:
             hist = yf.download(t, period="5y")["Adj Close"]
             price_data[t] = hist
-        except: continue
+        except:
+            continue
     if price_data:
         st.line_chart(pd.DataFrame(price_data))
     else:
-        st.warning("No historical price data available for these stocks.")
+        st.warning("No historical price data available.")
 except:
-    st.warning("Unable to load backtest chart. Please try again later.")
-    # --- Rebalancing Plan ---
+    st.warning("Backtest chart error.")
+    # --- Rebalancing Section ---
 st.subheader("Rebalance Plan")
 current_shares = {}
 for ticker in buy_df["Ticker"]:
@@ -208,14 +208,14 @@ for _, row in buy_df.iterrows():
         else:
             st.write("No recent news available.")
 
-# --- Final Dark Theme ---
+# --- Final Dark Theme Styling ---
 st.markdown("""
 <style>
 html, body, [class*="css"] {
     background-color: #0E1117 !important;
     color: white !important;
 }
-.stDataFrame, .stTextInput, .stNumberInput, .stSelectbox, .stSlider {
+.stDataFrame, .stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stExpanderHeader {
     background-color: #1E222A !important;
     color: white !important;
 }
