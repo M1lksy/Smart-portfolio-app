@@ -1,9 +1,9 @@
 import streamlit as st
 import pandas as pd
 import requests
-from sklearn.preprocessing import MinMaxScaler
 import yfinance as yf
 import time
+from sklearn.preprocessing import MinMaxScaler
 
 st.set_page_config(layout="wide", page_title="Smart Portfolio")
 
@@ -11,8 +11,9 @@ st.set_page_config(layout="wide", page_title="Smart Portfolio")
 FINNHUB_KEY = "cvud0p9r01qjg1391glgcvud0p9r01qjg1391gm0"
 ALPHA_KEY = "TPIRYXKQ80UVEUPR"
 TIINGO_KEY = "9477b5815b1ab7e5283843beec9d0b4c152025d1"
+MARKETSTACK_KEY = "84d35de2d7d3c225b77b712bc6ea1725"
 
-# --- UI ---
+# --- UI INPUTS ---
 st.title("Smart Portfolio: Value & Growth Picker")
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 lump_sum = st.number_input("Initial Lump Sum ($)", value=10000, step=500)
@@ -72,8 +73,7 @@ def fetch_stock_data(ticker):
 
     # --- Tiingo ---
     try:
-        url = f"https://api.tiingo.com/tiingo/daily/{ticker.replace('.AX','')}/fundamentals?token={TIINGO_KEY}"
-        tiingo = safe_request(url)
+        tiingo = safe_request(f"https://api.tiingo.com/tiingo/daily/{ticker.replace('.AX','')}/fundamentals?token={TIINGO_KEY}")
         latest = tiingo.get("statementData", {}).get("latest", {})
         if latest:
             data["PE Ratio"] = data.get("PE Ratio") or latest.get("peRatio", {}).get("value")
@@ -117,11 +117,10 @@ def build_dataframe(ticker_list):
     return pd.DataFrame(rows)
 
 df = build_dataframe(tickers)
-# --- Display Raw Data ---
+# --- Scoring + Display ---
 st.subheader("Raw Stock Data")
 st.dataframe(df)
 
-# --- Scoring System ---
 features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
 features["PE Ratio"] = 1 / features["PE Ratio"]
 features["PB Ratio"] = 1 / features["PB Ratio"]
@@ -130,7 +129,7 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-# --- Buy Signal Filtering ---
+# --- Buy Filtering ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 total_score = buy_df["Score"].sum()
@@ -138,7 +137,7 @@ buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
 buy_df["Est. Shares"] = (buy_df["Investment ($)"] / buy_df["Price"]).fillna(0).astype(int)
 
-# --- Display Buy Signals ---
+# --- Buy Table ---
 st.subheader("Buy Signals")
 if not buy_df.empty:
     st.dataframe(buy_df[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares", "Sector", "Source"]])
@@ -146,28 +145,35 @@ if not buy_df.empty:
 else:
     st.warning("No qualifying stocks at this time.")
 
-# --- Sector Distribution ---
+# --- Sector Chart ---
 st.subheader("Sector Diversification")
 if not buy_df.empty:
-    sector_counts = buy_df["Sector"].value_counts()
-    st.bar_chart(sector_counts)
+    st.bar_chart(buy_df["Sector"].value_counts())
 
-# --- Backtest Chart ---
-st.subheader("Backtest: 5-Year Price History")
-try:
-    price_data = {}
-    for t in buy_df["Ticker"]:
-        try:
-            hist = yf.download(t, period="5y")["Adj Close"]
-            price_data[t] = hist
-        except:
-            continue
-    if price_data:
-        st.line_chart(pd.DataFrame(price_data))
-    else:
-        st.warning("No historical price data available.")
-except:
-    st.warning("Backtest chart error.")
+# --- Marketstack Backtest ---
+st.subheader("Backtest: 5-Year Price Trend")
+
+@st.cache_data
+def get_price_history(ticker):
+    url = f"http://api.marketstack.com/v1/eod?access_key={MARKETSTACK_KEY}&symbols={ticker}&limit=1300"
+    response = safe_request(url)
+    prices = response.get("data", [])
+    series = pd.DataFrame(prices)[["date", "adj_close"]]
+    series["date"] = pd.to_datetime(series["date"])
+    series = series.set_index("date").sort_index()
+    return series["adj_close"] if not series.empty else None
+
+price_history = {}
+for t in buy_df["Ticker"]:
+    hist = get_price_history(t)
+    if hist is not None:
+        price_history[t] = hist
+
+if price_history:
+    chart_df = pd.DataFrame(price_history)
+    st.line_chart(chart_df)
+else:
+    st.warning("No historical price data available.")
     # --- Rebalance Plan ---
 st.subheader("Rebalance Plan")
 current_shares = {}
@@ -189,7 +195,7 @@ st.dataframe(buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Actio
 rebalance_csv = buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]].to_csv(index=False)
 st.download_button("Download Rebalance Plan", data=rebalance_csv, file_name="rebalance_plan.csv", mime="text/csv")
 
-# --- Projected Wealth ---
+# --- Wealth Projection ---
 st.subheader("Projected Wealth Calculator")
 contribution = st.number_input("Fortnightly Contribution ($)", value=500, step=50)
 
@@ -218,15 +224,20 @@ for _, row in buy_df.iterrows():
         else:
             st.write("No recent news available.")
 
-# --- Final Dark Mode Styling ---
+# --- Dark Theme Styling ---
 st.markdown("""
 <style>
 html, body, [class*="css"] {
     background-color: #0E1117 !important;
     color: white !important;
 }
-.stDataFrame, .stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stExpanderHeader {
+.stDataFrame, .stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stExpanderHeader, .stButton > button {
     background-color: #1E222A !important;
+    color: white !important;
+    border-color: #3E3E3E !important;
+}
+.stDownloadButton > button {
+    background-color: #444 !important;
     color: white !important;
 }
 </style>
