@@ -5,16 +5,16 @@ import yfinance as yf
 import time
 from sklearn.preprocessing import MinMaxScaler
 
-# --- Streamlit Config ---
+# Streamlit Setup
 st.set_page_config(layout="wide", page_title="Smart Portfolio")
 
-# --- API KEYS ---
+# --- API Keys ---
 FINNHUB_KEY = "cvud0p9r01qjg1391glgcvud0p9r01qjg1391gm0"
 ALPHA_KEY = "TPIRYXKQ80UVEUPR"
 TIINGO_KEY = "9477b5815b1ab7e5283843beec9d0b4c152025d1"
 MARKETSTACK_KEY = "84d35de2d7d3c225b77b712bc6ea1725"
 
-# --- UI Inputs ---
+# --- User Inputs ---
 st.title("Smart Portfolio: Value & Growth Picker")
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 lump_sum = st.number_input("Initial Lump Sum ($)", value=10000, step=500)
@@ -24,7 +24,7 @@ market_pool = st.selectbox("Select Market Pool", ["US Only", "AU Only", "Mixed (
 avoid_sector_overload = st.toggle("Avoid Sector Overload")
 show_watchlist = st.toggle("Enable Watchlist/Manual Compare Mode")
 
-# --- Ticker List ---
+# --- Ticker Lists ---
 TICKERS = {
     "US Only": ["AAPL", "MSFT", "GOOGL", "TSLA"],
     "AU Only": ["BHP.AX", "WES.AX", "CSL.AX", "CBA.AX"],
@@ -32,14 +32,14 @@ TICKERS = {
 }
 tickers = TICKERS[market_pool]
 
-# --- Sectors for Display ---
+# --- Sector Mapping ---
 SECTOR_MAP = {
     "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Communication",
     "TSLA": "Consumer Cyclical", "BHP.AX": "Materials", "WES.AX": "Consumer Defensive",
     "CSL.AX": "Healthcare", "CBA.AX": "Financials"
 }
 
-# --- Red & Black Dark Theme CSS ---
+# --- Red/Black Dark Mode ---
 st.markdown("""
 <style>
 html, body, [class*="css"] {
@@ -73,7 +73,7 @@ def fetch_stock_data(ticker):
     data = {"Ticker": ticker, "Source": [], "News": []}
     required = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Price"]
 
-    # --- Finnhub ---
+    # --- Finnhub Primary ---
     try:
         profile = safe_request(f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_KEY}")
         metrics = safe_request(f"https://finnhub.io/api/v1/stock/metric?symbol={ticker}&metric=all&token={FINNHUB_KEY}").get("metric", {})
@@ -95,7 +95,7 @@ def fetch_stock_data(ticker):
         data["Source"].append("Finnhub")
     except: pass
 
-    # --- Tiingo fallback ---
+    # --- Tiingo Fallback ---
     try:
         tiingo = safe_request(f"https://api.tiingo.com/tiingo/daily/{ticker.replace('.AX','')}/fundamentals?token={TIINGO_KEY}")
         latest = tiingo.get("statementData", {}).get("latest", {})
@@ -108,7 +108,7 @@ def fetch_stock_data(ticker):
             data["Source"].append("Tiingo")
     except: pass
 
-    # --- Alpha Vantage fallback ---
+    # --- Alpha Vantage Fallback ---
     try:
         ov = safe_request(f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_KEY}")
         quote = safe_request(f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={ALPHA_KEY}")
@@ -153,7 +153,7 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-# --- Sector Diversification Toggle ---
+# --- Sector Diversification (optional) ---
 if avoid_sector_overload:
     sector_avg = df["Sector"].value_counts(normalize=True)
     sector_penalty = sector_avg * 0.2
@@ -186,7 +186,7 @@ if show_watchlist:
 st.subheader("Sector Diversification")
 if not buy_df.empty:
     st.bar_chart(buy_df["Sector"].value_counts())
-    # --- Backtest Chart with Range Selector ---
+    # --- Backtest Chart ---
 st.subheader("Backtest: Price History")
 range_choice = st.selectbox("Select Backtest Range", ["1y", "3y", "5y"], index=2)
 
