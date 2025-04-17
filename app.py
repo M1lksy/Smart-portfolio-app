@@ -13,13 +13,15 @@ ALPHA_KEY = "TPIRYXKQ80UVEUPR"
 TIINGO_KEY = "9477b5815b1ab7e5283843beec9d0b4c152025d1"
 MARKETSTACK_KEY = "84d35de2d7d3c225b77b712bc6ea1725"
 
-# --- UI INPUTS ---
+# --- UI Inputs ---
 st.title("Smart Portfolio: Value & Growth Picker")
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 lump_sum = st.number_input("Initial Lump Sum ($)", value=10000, step=500)
 years = st.slider("Years to Project", 1, 40, 20)
 expected_return = st.slider("Expected Annual Return (%)", 1, 15, 7)
 market_pool = st.selectbox("Select Market Pool", ["US Only", "AU Only", "Mixed (US + AU)"])
+avoid_sector_overload = st.toggle("Avoid Sector Overload")
+show_watchlist = st.toggle("Enable Watchlist/Manual Compare Mode")
 
 TICKERS = {
     "US Only": ["AAPL", "MSFT", "GOOGL", "TSLA"],
@@ -33,6 +35,26 @@ SECTOR_MAP = {
     "TSLA": "Consumer Cyclical", "BHP.AX": "Materials", "WES.AX": "Consumer Defensive",
     "CSL.AX": "Healthcare", "CBA.AX": "Financials"
 }
+
+# --- Dark Red Theme Styling ---
+st.markdown("""
+<style>
+html, body, [class*="css"] {
+    background-color: #0E0E0E !important;
+    color: #EDEDED !important;
+}
+.stDataFrame, .stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stExpanderHeader {
+    background-color: #1B1B1B !important;
+    color: #EDEDED !important;
+    border-color: #3A3A3A !important;
+}
+.stButton > button, .stDownloadButton > button {
+    background-color: #B22222 !important;
+    color: white !important;
+    border: 1px solid #911C1C !important;
+}
+</style>
+""", unsafe_allow_html=True)
 def safe_request(url, retries=2, delay=1):
     for _ in range(retries):
         try:
@@ -117,7 +139,7 @@ def build_dataframe(ticker_list):
     return pd.DataFrame(rows)
 
 df = build_dataframe(tickers)
-# --- Scoring + Display ---
+# --- Feature Scoring ---
 st.subheader("Raw Stock Data")
 st.dataframe(df)
 
@@ -129,7 +151,13 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-# --- Buy Filtering ---
+# --- Apply Sector Overload Logic ---
+if avoid_sector_overload:
+    sector_avg = df["Sector"].value_counts(normalize=True)
+    sector_penalty = sector_avg * 0.2  # reduce overconcentration by 20%
+    df["Score"] = df.apply(lambda r: r["Score"] * (1 - sector_penalty.get(r["Sector"], 0)), axis=1)
+
+# --- Filter Buy Signals ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 total_score = buy_df["Score"].sum()
@@ -137,7 +165,13 @@ buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
 buy_df["Est. Shares"] = (buy_df["Investment ($)"] / buy_df["Price"]).fillna(0).astype(int)
 
-# --- Buy Table ---
+# --- Watchlist Mode ---
+if show_watchlist:
+    st.subheader("Watchlist / Manual Compare")
+    watchlist = df[df["Score"] < 40]
+    st.dataframe(watchlist[["Ticker", "Name", "Score", "PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Sector"]])
+
+# --- Buy Display ---
 st.subheader("Buy Signals")
 if not buy_df.empty:
     st.dataframe(buy_df[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares", "Sector", "Source"]])
@@ -145,36 +179,34 @@ if not buy_df.empty:
 else:
     st.warning("No qualifying stocks at this time.")
 
-# --- Sector Chart ---
+# --- Sector Breakdown ---
 st.subheader("Sector Diversification")
 if not buy_df.empty:
     st.bar_chart(buy_df["Sector"].value_counts())
-
-# --- Marketstack Backtest ---
-st.subheader("Backtest: 5-Year Price Trend")
+    # --- Backtest Chart w/ Range Selector ---
+st.subheader("Backtest: Price History")
+range_choice = st.selectbox("Select Backtest Range", ["1y", "3y", "5y"], index=2)
 
 @st.cache_data
-def get_price_history(ticker):
-    url = f"http://api.marketstack.com/v1/eod?access_key={MARKETSTACK_KEY}&symbols={ticker}&limit=1300"
-    response = safe_request(url)
-    prices = response.get("data", [])
-    series = pd.DataFrame(prices)[["date", "adj_close"]]
-    series["date"] = pd.to_datetime(series["date"])
-    series = series.set_index("date").sort_index()
-    return series["adj_close"] if not series.empty else None
+def get_price_history(ticker, period):
+    try:
+        df = yf.download(ticker, period=period)["Adj Close"]
+        return df if not df.empty else None
+    except:
+        return None
 
-price_history = {}
+price_data = {}
 for t in buy_df["Ticker"]:
-    hist = get_price_history(t)
-    if hist is not None:
-        price_history[t] = hist
+    series = get_price_history(t, period=range_choice)
+    if series is not None:
+        price_data[t] = series
 
-if price_history:
-    chart_df = pd.DataFrame(price_history)
-    st.line_chart(chart_df)
+if price_data:
+    st.line_chart(pd.DataFrame(price_data))
 else:
     st.warning("No historical price data available.")
-    # --- Rebalance Plan ---
+
+# --- Rebalancing Plan ---
 st.subheader("Rebalance Plan")
 current_shares = {}
 for ticker in buy_df["Ticker"]:
@@ -195,7 +227,7 @@ st.dataframe(buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Actio
 rebalance_csv = buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]].to_csv(index=False)
 st.download_button("Download Rebalance Plan", data=rebalance_csv, file_name="rebalance_plan.csv", mime="text/csv")
 
-# --- Wealth Projection ---
+# --- Projected Wealth ---
 st.subheader("Projected Wealth Calculator")
 contribution = st.number_input("Fortnightly Contribution ($)", value=500, step=50)
 
@@ -210,7 +242,7 @@ df_growth = pd.DataFrame(history, columns=["Year", "Projected Wealth ($)"])
 st.line_chart(df_growth.set_index("Year"))
 st.success(f"Projected portfolio in {years} years: ${df_growth.iloc[-1]['Projected Wealth ($)']:,.2f}")
 
-# --- News Section ---
+# --- News Feed ---
 st.subheader("Latest News by Stock")
 for _, row in buy_df.iterrows():
     with st.expander(f"{row['Ticker']} News"):
@@ -223,22 +255,3 @@ for _, row in buy_df.iterrows():
                     st.markdown(f"- [{title}]({url})")
         else:
             st.write("No recent news available.")
-
-# --- Dark Theme Styling ---
-st.markdown("""
-<style>
-html, body, [class*="css"] {
-    background-color: #0E1117 !important;
-    color: white !important;
-}
-.stDataFrame, .stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stExpanderHeader, .stButton > button {
-    background-color: #1E222A !important;
-    color: white !important;
-    border-color: #3E3E3E !important;
-}
-.stDownloadButton > button {
-    background-color: #444 !important;
-    color: white !important;
-}
-</style>
-""", unsafe_allow_html=True)
