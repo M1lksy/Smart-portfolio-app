@@ -5,6 +5,7 @@ import yfinance as yf
 import time
 from sklearn.preprocessing import MinMaxScaler
 
+# --- Streamlit Config ---
 st.set_page_config(layout="wide", page_title="Smart Portfolio")
 
 # --- API KEYS ---
@@ -23,6 +24,7 @@ market_pool = st.selectbox("Select Market Pool", ["US Only", "AU Only", "Mixed (
 avoid_sector_overload = st.toggle("Avoid Sector Overload")
 show_watchlist = st.toggle("Enable Watchlist/Manual Compare Mode")
 
+# --- Ticker List ---
 TICKERS = {
     "US Only": ["AAPL", "MSFT", "GOOGL", "TSLA"],
     "AU Only": ["BHP.AX", "WES.AX", "CSL.AX", "CBA.AX"],
@@ -30,13 +32,14 @@ TICKERS = {
 }
 tickers = TICKERS[market_pool]
 
+# --- Sectors for Display ---
 SECTOR_MAP = {
     "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Communication",
     "TSLA": "Consumer Cyclical", "BHP.AX": "Materials", "WES.AX": "Consumer Defensive",
     "CSL.AX": "Healthcare", "CBA.AX": "Financials"
 }
 
-# --- Dark Red Theme Styling ---
+# --- Red & Black Dark Theme CSS ---
 st.markdown("""
 <style>
 html, body, [class*="css"] {
@@ -77,8 +80,7 @@ def fetch_stock_data(ticker):
         quote = safe_request(f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_KEY}")
         raw_news = safe_request(f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2024-01-01&to=2025-01-01&token={FINNHUB_KEY}")
 
-        clean_news = [{"title": n["headline"], "url": n["url"]}
-                      for n in raw_news[:5] if "headline" in n and "url" in n]
+        clean_news = [{"title": n.get("headline", ""), "url": n.get("url", "")} for n in raw_news[:5] if "url" in n]
 
         data.update({
             "Name": profile.get("name", ""),
@@ -93,7 +95,7 @@ def fetch_stock_data(ticker):
         data["Source"].append("Finnhub")
     except: pass
 
-    # --- Tiingo ---
+    # --- Tiingo fallback ---
     try:
         tiingo = safe_request(f"https://api.tiingo.com/tiingo/daily/{ticker.replace('.AX','')}/fundamentals?token={TIINGO_KEY}")
         latest = tiingo.get("statementData", {}).get("latest", {})
@@ -106,7 +108,7 @@ def fetch_stock_data(ticker):
             data["Source"].append("Tiingo")
     except: pass
 
-    # --- Alpha Vantage ---
+    # --- Alpha Vantage fallback ---
     try:
         ov = safe_request(f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_KEY}")
         quote = safe_request(f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={ALPHA_KEY}")
@@ -139,7 +141,7 @@ def build_dataframe(ticker_list):
     return pd.DataFrame(rows)
 
 df = build_dataframe(tickers)
-# --- Feature Scoring ---
+# --- Scoring Logic ---
 st.subheader("Raw Stock Data")
 st.dataframe(df)
 
@@ -151,25 +153,20 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-# --- Apply Sector Overload Logic ---
+# --- Sector Diversification Toggle ---
 if avoid_sector_overload:
     sector_avg = df["Sector"].value_counts(normalize=True)
-    sector_penalty = sector_avg * 0.2  # reduce overconcentration by 20%
+    sector_penalty = sector_avg * 0.2
     df["Score"] = df.apply(lambda r: r["Score"] * (1 - sector_penalty.get(r["Sector"], 0)), axis=1)
 
-# --- Filter Buy Signals ---
+# --- Buy Signal Filter ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 total_score = buy_df["Score"].sum()
+
 buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
 buy_df["Est. Shares"] = (buy_df["Investment ($)"] / buy_df["Price"]).fillna(0).astype(int)
-
-# --- Watchlist Mode ---
-if show_watchlist:
-    st.subheader("Watchlist / Manual Compare")
-    watchlist = df[df["Score"] < 40]
-    st.dataframe(watchlist[["Ticker", "Name", "Score", "PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Sector"]])
 
 # --- Buy Display ---
 st.subheader("Buy Signals")
@@ -179,11 +176,17 @@ if not buy_df.empty:
 else:
     st.warning("No qualifying stocks at this time.")
 
-# --- Sector Breakdown ---
+# --- Watchlist Mode ---
+if show_watchlist:
+    st.subheader("Watchlist / Manual Compare")
+    watchlist = df[df["Score"] < 40]
+    st.dataframe(watchlist[["Ticker", "Name", "Score", "PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Sector"]])
+
+# --- Sector Visualization ---
 st.subheader("Sector Diversification")
 if not buy_df.empty:
     st.bar_chart(buy_df["Sector"].value_counts())
-    # --- Backtest Chart w/ Range Selector ---
+    # --- Backtest Chart with Range Selector ---
 st.subheader("Backtest: Price History")
 range_choice = st.selectbox("Select Backtest Range", ["1y", "3y", "5y"], index=2)
 
@@ -206,7 +209,7 @@ if price_data:
 else:
     st.warning("No historical price data available.")
 
-# --- Rebalancing Plan ---
+# --- Rebalance Section ---
 st.subheader("Rebalance Plan")
 current_shares = {}
 for ticker in buy_df["Ticker"]:
