@@ -155,12 +155,18 @@ missing_cols = [col for col in required_cols if col not in df.columns]
 if missing_cols:
     st.error(f"Missing columns in data: {', '.join(missing_cols)}")
     st.stop()
-    # --- Scoring & Ranking ---
-features = df[required_cols].copy()
-features["PE Ratio"] = 1 / features["PE Ratio"]
-features["PB Ratio"] = 1 / features["PB Ratio"]
-features["Debt/Equity"] = 1 / features["Debt/Equity"]
-features = features.fillna(features.mean())
+# --- Prepare features for scoring ---
+features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
+
+# Invert PB and Debt/Equity safely
+features["PB Ratio"] = 1 / features["PB Ratio"].replace(0, np.nan)
+features["Debt/Equity"] = 1 / features["Debt/Equity"].replace(0, np.nan)
+
+# Handle infinite and missing values
+features.replace([np.inf, -np.inf], np.nan, inplace=True)
+features.fillna(features.mean(), inplace=True)
+
+# Normalize and score
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
