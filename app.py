@@ -167,9 +167,26 @@ features.replace([np.inf, -np.inf], np.nan, inplace=True)
 features.fillna(features.mean(), inplace=True)
 
 # Normalize and score
+from sklearn.preprocessing import MinMaxScaler
+import numpy as np
+
+# Safe feature extraction
+features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
+
+# Fix infinite and missing values
+features.replace([np.inf, -np.inf], np.nan, inplace=True)
+features.fillna(0, inplace=True)
+
+# Invert PB Ratio and Debt/Equity so lower is better
+features["PB Ratio"] = 1 / features["PB Ratio"].replace(0, np.nan)
+features["Debt/Equity"] = 1 / features["Debt/Equity"].replace(0, np.nan)
+
+# Fill new NaNs after inversion
+features.fillna(0, inplace=True)
+
+# Normalize and score
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
-
 # --- Sector Penalty (Optional) ---
 if avoid_sector_overload:
     sector_avg = df["Sector"].value_counts(normalize=True)
@@ -208,11 +225,21 @@ st.subheader("Backtest: Price History")
 range_choice = st.selectbox("Select Backtest Range", ["1y", "3y", "5y"], index=2)
 
 @st.cache_data
-def get_price_history(ticker, period):
+def get_price_history(ticker, backtest_years, market="US"):
+    import yfinance as yf
+    import datetime
+
+    if market == "AU" and not ticker.endswith(".AX"):
+        ticker += ".AX"
+
+    end_date = datetime.datetime.now()
+    start_date = end_date - datetime.timedelta(days=backtest_years * 365)
+
     try:
-        df = yf.download(ticker, period=period)["Adj Close"]
-        return df if not df.empty else None
-    except:
+        data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        return data["Close"]
+    except Exception as e:
+        print(f"Error fetching price history for {ticker}: {e}")
         return None
 
 price_data = {}
