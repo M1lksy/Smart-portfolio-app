@@ -54,31 +54,43 @@ SECTOR_MAP = {
 # --- Dark Red Theme ---
 st.markdown("""
 <style>
+/* Base background and text */
 html, body, [class*="css"] {
     background-color: #0E0E0E !important;
     color: #EDEDED !important;
 }
-.stDataFrame, .stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stExpanderHeader {
+
+/* Input fields, buttons, sliders, and tables */
+.stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stDataFrame, .stExpander, .stTextArea {
     background-color: #1B1B1B !important;
     color: #EDEDED !important;
     border-color: #3A3A3A !important;
 }
+
+/* Primary buttons */
 .stButton > button, .stDownloadButton > button {
     background-color: #B22222 !important;
     color: white !important;
     border: 1px solid #911C1C !important;
 }
+
+/* Slider track */
+.stSlider > div > div > div {
+    background-color: #911C1C !important;
+}
+
+/* Highlight selected dropdown or input values */
+.css-1cpxqw2, .css-1wa3eu0-placeholder {
+    color: #FFFFFF !important;
+}
+
+/* Expander header */
+.stExpanderHeader {
+    background-color: #1B1B1B !important;
+    color: #EDEDED !important;
+}
 </style>
 """, unsafe_allow_html=True)
-def safe_request(url, retries=2, delay=1):
-    for _ in range(retries):
-        try:
-            r = requests.get(url, timeout=8)
-            if r.status_code == 200:
-                return r.json()
-        except:
-            time.sleep(delay)
-    return {}
 
 @st.cache_data
 def fetch_stock_data(ticker):
