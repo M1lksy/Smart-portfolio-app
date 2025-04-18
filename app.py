@@ -183,7 +183,14 @@ df = build_dataframe(tickers)
 st.subheader("Raw Stock Data")
 st.dataframe(df)
 
-features = df[["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]].copy()
+required_cols = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]
+missing_cols = [col for col in required_cols if col not in df.columns]
+
+if missing_cols:
+    st.error(f"Missing columns in data: {', '.join(missing_cols)}")
+    st.stop()
+
+features = df[required_cols].copy()
 features["PE Ratio"] = 1 / features["PE Ratio"]
 features["PB Ratio"] = 1 / features["PB Ratio"]
 features["Debt/Equity"] = 1 / features["Debt/Equity"]
