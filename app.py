@@ -51,43 +51,61 @@ SECTOR_MAP = {
     "CSL.AX": "Healthcare", "CBA.AX": "Financials"
 }
 
-# --- Dark Red Theme ---
+# --- Dark Red & Black Theme Fix ---
 st.markdown("""
 <style>
-/* Base background and text */
+/* Global base */
 html, body, [class*="css"] {
     background-color: #0E0E0E !important;
     color: #EDEDED !important;
 }
 
-/* Input fields, buttons, sliders, and tables */
-.stTextInput, .stNumberInput, .stSelectbox, .stSlider, .stDataFrame, .stExpander, .stTextArea {
-    background-color: #1B1B1B !important;
-    color: #EDEDED !important;
-    border-color: #3A3A3A !important;
+/* Main containers */
+[data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
+    background-color: #0E0E0E !important;
 }
 
-/* Primary buttons */
-.stButton > button, .stDownloadButton > button {
+/* Input fields & widgets */
+.stTextInput input,
+.stNumberInput input,
+.stSelectbox div,
+.stSlider > div,
+.stTextArea textarea,
+.css-1cpxqw2, .css-1wa3eu0-placeholder {
+    background-color: #1B1B1B !important;
+    color: white !important;
+    border-color: #911C1C !important;
+}
+
+/* DataFrame tables */
+.stDataFrame, .stDataFrame div, .stDataFrame td, .stDataFrame th {
+    background-color: #111111 !important;
+    color: #EDEDED !important;
+}
+
+/* Buttons */
+.stButton > button,
+.stDownloadButton > button {
     background-color: #B22222 !important;
     color: white !important;
     border: 1px solid #911C1C !important;
 }
 
-/* Slider track */
+/* Sliders */
 .stSlider > div > div > div {
-    background-color: #911C1C !important;
+    background: #911C1C !important;
 }
 
-/* Highlight selected dropdown or input values */
-.css-1cpxqw2, .css-1wa3eu0-placeholder {
-    color: #FFFFFF !important;
-}
-
-/* Expander header */
-.stExpanderHeader {
+/* Expanders */
+.stExpander, .stExpanderHeader {
     background-color: #1B1B1B !important;
-    color: #EDEDED !important;
+    color: white !important;
+    border: 1px solid #3A3A3A !important;
+}
+
+/* Section titles */
+h1, h2, h3, h4 {
+    color: #FF4C4C !important;
 }
 </style>
 """, unsafe_allow_html=True)
