@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import requests
 import yfinance as yf
 import time
@@ -13,22 +14,40 @@ st.set_page_config(layout="wide", page_title="Smart Portfolio")
 FINNHUB_KEY = "cvud0p9r01qjg1391glgcvud0p9r01qjg1391gm0"
 ALPHA_KEY = "TPIRYXKQ80UVEUPR"
 TIINGO_KEY = "9477b5815b1ab7e5283843beec9d0b4c152025d1"
-MARKETSTACK_KEY = "84d35de2d7d3c225b77b712bc6ea1725"
 
-# --- Time Sync (WorldTimeAPI) ---
-@st.cache_data(ttl=60)
-def get_townsville_time():
-    try:
-        r = requests.get("https://worldtimeapi.org/api/timezone/Australia/Brisbane", timeout=10).json()
-        return datetime.fromisoformat(r["datetime"].split(".")[0]).strftime("%H:%M:%S")
-    except:
-        return "Unavailable"
+# --- Dark Red Theme ---
+st.markdown("""
+<style>
+html, body, [class*="css"] {
+    background-color: #0E0E0E !important;
+    color: #EDEDED !important;
+}
+[data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
+    background-color: #0E0E0E !important;
+}
+.stTextInput input, .stNumberInput input, .stSelectbox div, .stSlider > div,
+.stTextArea textarea, .stDataFrame, .stExpander, .stExpanderHeader {
+    background-color: #1B1B1B !important;
+    color: white !important;
+}
+.stButton > button, .stDownloadButton > button {
+    background-color: #B22222 !important;
+    color: white !important;
+    border: 1px solid #911C1C !important;
+}
+.stSlider > div > div > div {
+    background: #911C1C !important;
+}
+h1, h2, h3, h4 {
+    color: #FF4C4C !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
-current_time = get_townsville_time()
-st.markdown(f"**Townsville Time (synced):** `{current_time}`")
-
-# --- Inputs ---
+# --- Title & Inputs ---
 st.title("Smart Portfolio: Value & Growth Picker")
+st.caption("Townsville Time (synced): `Unavailable`")  # Placeholder for future sync
+
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 lump_sum = st.number_input("Initial Lump Sum ($)", value=10000, step=500)
 years = st.slider("Years to Project", 1, 40, 20)
@@ -50,65 +69,15 @@ SECTOR_MAP = {
     "TSLA": "Consumer Cyclical", "BHP.AX": "Materials", "WES.AX": "Consumer Defensive",
     "CSL.AX": "Healthcare", "CBA.AX": "Financials"
 }
-
-# --- Dark Red & Black Theme Fix ---
-st.markdown("""
-<style>
-/* Global base */
-html, body, [class*="css"] {
-    background-color: #0E0E0E !important;
-    color: #EDEDED !important;
-}
-
-/* Main containers */
-[data-testid="stAppViewContainer"], [data-testid="stHeader"], [data-testid="stSidebar"] {
-    background-color: #0E0E0E !important;
-}
-
-/* Input fields & widgets */
-.stTextInput input,
-.stNumberInput input,
-.stSelectbox div,
-.stSlider > div,
-.stTextArea textarea,
-.css-1cpxqw2, .css-1wa3eu0-placeholder {
-    background-color: #1B1B1B !important;
-    color: white !important;
-    border-color: #911C1C !important;
-}
-
-/* DataFrame tables */
-.stDataFrame, .stDataFrame div, .stDataFrame td, .stDataFrame th {
-    background-color: #111111 !important;
-    color: #EDEDED !important;
-}
-
-/* Buttons */
-.stButton > button,
-.stDownloadButton > button {
-    background-color: #B22222 !important;
-    color: white !important;
-    border: 1px solid #911C1C !important;
-}
-
-/* Sliders */
-.stSlider > div > div > div {
-    background: #911C1C !important;
-}
-
-/* Expanders */
-.stExpander, .stExpanderHeader {
-    background-color: #1B1B1B !important;
-    color: white !important;
-    border: 1px solid #3A3A3A !important;
-}
-
-/* Section titles */
-h1, h2, h3, h4 {
-    color: #FF4C4C !important;
-}
-</style>
-""", unsafe_allow_html=True)
+def safe_request(url, retries=2, delay=1):
+    for _ in range(retries):
+        try:
+            r = requests.get(url, timeout=8)
+            if r.status_code == 200:
+                return r.json()
+        except:
+            time.sleep(delay)
+    return {}
 
 @st.cache_data
 def fetch_stock_data(ticker):
@@ -179,17 +148,14 @@ def build_dataframe(ticker_list):
     return pd.DataFrame(rows)
 
 df = build_dataframe(tickers)
-# --- Scoring Logic ---
-st.subheader("Raw Stock Data")
-st.dataframe(df)
 
+# Column validation before scoring
 required_cols = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth"]
 missing_cols = [col for col in required_cols if col not in df.columns]
-
 if missing_cols:
     st.error(f"Missing columns in data: {', '.join(missing_cols)}")
     st.stop()
-
+    # --- Scoring & Ranking ---
 features = df[required_cols].copy()
 features["PE Ratio"] = 1 / features["PE Ratio"]
 features["PB Ratio"] = 1 / features["PB Ratio"]
@@ -204,7 +170,7 @@ if avoid_sector_overload:
     sector_penalty = sector_avg * 0.2
     df["Score"] = df.apply(lambda r: r["Score"] * (1 - sector_penalty.get(r["Sector"], 0)), axis=1)
 
-# --- Buy Signal Filter ---
+# --- Buy Signal Filtering ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 total_score = buy_df["Score"].sum()
@@ -213,7 +179,7 @@ buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
 buy_df["Est. Shares"] = (buy_df["Investment ($)"] / buy_df["Price"]).fillna(0).astype(int)
 
-# --- Buy Signals ---
+# --- Buy Signals Display ---
 st.subheader("Buy Signals")
 if not buy_df.empty:
     st.dataframe(buy_df[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares", "Sector", "Source"]])
@@ -221,13 +187,13 @@ if not buy_df.empty:
 else:
     st.warning("No qualifying stocks at this time.")
 
-# --- Watchlist (Optional) ---
+# --- Watchlist View ---
 if show_watchlist:
     st.subheader("Watchlist / Manual Compare")
     watchlist = df[df["Score"] < 40]
     st.dataframe(watchlist[["Ticker", "Name", "Score", "PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Sector"]])
 
-# --- Sector Chart ---
+# --- Sector Breakdown ---
 st.subheader("Sector Diversification")
 if not buy_df.empty:
     st.bar_chart(buy_df["Sector"].value_counts())
@@ -252,9 +218,9 @@ for t in buy_df["Ticker"]:
 if price_data:
     st.line_chart(pd.DataFrame(price_data))
 else:
-    st.warning("No historical price data available. Check internet access or try again later.")
+    st.warning("No historical price data available.")
 
-# --- Rebalance Tool ---
+# --- Rebalance Plan ---
 st.subheader("Rebalance Plan")
 current_shares = {}
 for ticker in buy_df["Ticker"]:
@@ -290,7 +256,7 @@ df_growth = pd.DataFrame(history, columns=["Year", "Projected Wealth ($)"])
 st.line_chart(df_growth.set_index("Year"))
 st.success(f"Projected portfolio in {years} years: ${df_growth.iloc[-1]['Projected Wealth ($)']:,.2f}")
 
-# --- News Display (Cleaned) ---
+# --- News Feed ---
 st.subheader("Latest News by Stock")
 for _, row in buy_df.iterrows():
     with st.expander(f"{row['Ticker']} News"):
