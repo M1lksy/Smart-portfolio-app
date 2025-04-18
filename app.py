@@ -3,18 +3,31 @@ import pandas as pd
 import requests
 import yfinance as yf
 import time
+from datetime import datetime
 from sklearn.preprocessing import MinMaxScaler
 
-# Streamlit Setup
+# --- App Config ---
 st.set_page_config(layout="wide", page_title="Smart Portfolio")
 
-# --- API Keys ---
+# --- API KEYS ---
 FINNHUB_KEY = "cvud0p9r01qjg1391glgcvud0p9r01qjg1391gm0"
 ALPHA_KEY = "TPIRYXKQ80UVEUPR"
 TIINGO_KEY = "9477b5815b1ab7e5283843beec9d0b4c152025d1"
 MARKETSTACK_KEY = "84d35de2d7d3c225b77b712bc6ea1725"
 
-# --- User Inputs ---
+# --- World Time API Sync ---
+@st.cache_data(ttl=60)
+def get_townsville_time():
+    try:
+        r = requests.get("https://worldtimeapi.org/api/timezone/Australia/Brisbane", timeout=10).json()
+        return datetime.fromisoformat(r["datetime"].split(".")[0]).strftime("%H:%M:%S")
+    except:
+        return "Unavailable"
+
+current_time = get_townsville_time()
+st.markdown(f"**Townsville Time (synced):** `{current_time}`")
+
+# --- UI Inputs ---
 st.title("Smart Portfolio: Value & Growth Picker")
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 lump_sum = st.number_input("Initial Lump Sum ($)", value=10000, step=500)
@@ -24,7 +37,7 @@ market_pool = st.selectbox("Select Market Pool", ["US Only", "AU Only", "Mixed (
 avoid_sector_overload = st.toggle("Avoid Sector Overload")
 show_watchlist = st.toggle("Enable Watchlist/Manual Compare Mode")
 
-# --- Ticker Lists ---
+# --- Ticker Pool ---
 TICKERS = {
     "US Only": ["AAPL", "MSFT", "GOOGL", "TSLA"],
     "AU Only": ["BHP.AX", "WES.AX", "CSL.AX", "CBA.AX"],
@@ -39,7 +52,7 @@ SECTOR_MAP = {
     "CSL.AX": "Healthcare", "CBA.AX": "Financials"
 }
 
-# --- Red/Black Dark Mode ---
+# --- Theme: Red & Black ---
 st.markdown("""
 <style>
 html, body, [class*="css"] {
@@ -73,13 +86,12 @@ def fetch_stock_data(ticker):
     data = {"Ticker": ticker, "Source": [], "News": []}
     required = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Price"]
 
-    # --- Finnhub Primary ---
+    # --- Finnhub ---
     try:
         profile = safe_request(f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_KEY}")
         metrics = safe_request(f"https://finnhub.io/api/v1/stock/metric?symbol={ticker}&metric=all&token={FINNHUB_KEY}").get("metric", {})
         quote = safe_request(f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_KEY}")
         raw_news = safe_request(f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2024-01-01&to=2025-01-01&token={FINNHUB_KEY}")
-
         clean_news = [{"title": n.get("headline", ""), "url": n.get("url", "")} for n in raw_news[:5] if "url" in n]
 
         data.update({
@@ -95,7 +107,7 @@ def fetch_stock_data(ticker):
         data["Source"].append("Finnhub")
     except: pass
 
-    # --- Tiingo Fallback ---
+    # --- Tiingo ---
     try:
         tiingo = safe_request(f"https://api.tiingo.com/tiingo/daily/{ticker.replace('.AX','')}/fundamentals?token={TIINGO_KEY}")
         latest = tiingo.get("statementData", {}).get("latest", {})
@@ -108,7 +120,7 @@ def fetch_stock_data(ticker):
             data["Source"].append("Tiingo")
     except: pass
 
-    # --- Alpha Vantage Fallback ---
+    # --- Alpha Vantage ---
     try:
         ov = safe_request(f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_KEY}")
         quote = safe_request(f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={ALPHA_KEY}")
@@ -153,13 +165,13 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-# --- Sector Diversification (optional) ---
+# --- Sector Diversification ---
 if avoid_sector_overload:
     sector_avg = df["Sector"].value_counts(normalize=True)
     sector_penalty = sector_avg * 0.2
     df["Score"] = df.apply(lambda r: r["Score"] * (1 - sector_penalty.get(r["Sector"], 0)), axis=1)
 
-# --- Buy Signal Filter ---
+# --- Buy Signal Filtering ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 total_score = buy_df["Score"].sum()
@@ -176,13 +188,13 @@ if not buy_df.empty:
 else:
     st.warning("No qualifying stocks at this time.")
 
-# --- Watchlist Mode ---
+# --- Watchlist View ---
 if show_watchlist:
     st.subheader("Watchlist / Manual Compare")
     watchlist = df[df["Score"] < 40]
     st.dataframe(watchlist[["Ticker", "Name", "Score", "PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Sector"]])
 
-# --- Sector Visualization ---
+# --- Sector Chart ---
 st.subheader("Sector Diversification")
 if not buy_df.empty:
     st.bar_chart(buy_df["Sector"].value_counts())
@@ -209,7 +221,7 @@ if price_data:
 else:
     st.warning("No historical price data available.")
 
-# --- Rebalance Section ---
+# --- Rebalance Tool ---
 st.subheader("Rebalance Plan")
 current_shares = {}
 for ticker in buy_df["Ticker"]:
@@ -230,7 +242,7 @@ st.dataframe(buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Actio
 rebalance_csv = buy_df[["Ticker", "Name", "Current Shares", "Target Shares", "Action"]].to_csv(index=False)
 st.download_button("Download Rebalance Plan", data=rebalance_csv, file_name="rebalance_plan.csv", mime="text/csv")
 
-# --- Projected Wealth ---
+# --- Wealth Projection ---
 st.subheader("Projected Wealth Calculator")
 contribution = st.number_input("Fortnightly Contribution ($)", value=500, step=50)
 
