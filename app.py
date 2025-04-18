@@ -6,16 +6,16 @@ import time
 from datetime import datetime
 from sklearn.preprocessing import MinMaxScaler
 
-# --- App Config ---
+# --- Streamlit Setup ---
 st.set_page_config(layout="wide", page_title="Smart Portfolio")
 
-# --- API KEYS ---
+# --- API Keys ---
 FINNHUB_KEY = "cvud0p9r01qjg1391glgcvud0p9r01qjg1391gm0"
 ALPHA_KEY = "TPIRYXKQ80UVEUPR"
 TIINGO_KEY = "9477b5815b1ab7e5283843beec9d0b4c152025d1"
 MARKETSTACK_KEY = "84d35de2d7d3c225b77b712bc6ea1725"
 
-# --- World Time API Sync ---
+# --- Time Sync (WorldTimeAPI) ---
 @st.cache_data(ttl=60)
 def get_townsville_time():
     try:
@@ -27,7 +27,7 @@ def get_townsville_time():
 current_time = get_townsville_time()
 st.markdown(f"**Townsville Time (synced):** `{current_time}`")
 
-# --- UI Inputs ---
+# --- Inputs ---
 st.title("Smart Portfolio: Value & Growth Picker")
 investment_amount = st.number_input("Investment Amount ($)", value=500, step=100)
 lump_sum = st.number_input("Initial Lump Sum ($)", value=10000, step=500)
@@ -35,9 +35,9 @@ years = st.slider("Years to Project", 1, 40, 20)
 expected_return = st.slider("Expected Annual Return (%)", 1, 15, 7)
 market_pool = st.selectbox("Select Market Pool", ["US Only", "AU Only", "Mixed (US + AU)"])
 avoid_sector_overload = st.toggle("Avoid Sector Overload")
-show_watchlist = st.toggle("Enable Watchlist/Manual Compare Mode")
+show_watchlist = st.toggle("Enable Watchlist Mode")
 
-# --- Ticker Pool ---
+# --- Tickers ---
 TICKERS = {
     "US Only": ["AAPL", "MSFT", "GOOGL", "TSLA"],
     "AU Only": ["BHP.AX", "WES.AX", "CSL.AX", "CBA.AX"],
@@ -45,14 +45,13 @@ TICKERS = {
 }
 tickers = TICKERS[market_pool]
 
-# --- Sector Mapping ---
 SECTOR_MAP = {
     "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Communication",
     "TSLA": "Consumer Cyclical", "BHP.AX": "Materials", "WES.AX": "Consumer Defensive",
     "CSL.AX": "Healthcare", "CBA.AX": "Financials"
 }
 
-# --- Theme: Red & Black ---
+# --- Dark Red Theme ---
 st.markdown("""
 <style>
 html, body, [class*="css"] {
@@ -86,13 +85,12 @@ def fetch_stock_data(ticker):
     data = {"Ticker": ticker, "Source": [], "News": []}
     required = ["PE Ratio", "PB Ratio", "ROE", "Debt/Equity", "EPS Growth", "Price"]
 
-    # --- Finnhub ---
     try:
         profile = safe_request(f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FINNHUB_KEY}")
         metrics = safe_request(f"https://finnhub.io/api/v1/stock/metric?symbol={ticker}&metric=all&token={FINNHUB_KEY}").get("metric", {})
         quote = safe_request(f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_KEY}")
         raw_news = safe_request(f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2024-01-01&to=2025-01-01&token={FINNHUB_KEY}")
-        clean_news = [{"title": n.get("headline", ""), "url": n.get("url", "")} for n in raw_news[:5] if "url" in n]
+        clean_news = [{"title": n.get("headline", ""), "url": n.get("url", "")} for n in raw_news[:5] if n.get("url")]
 
         data.update({
             "Name": profile.get("name", ""),
@@ -107,7 +105,6 @@ def fetch_stock_data(ticker):
         data["Source"].append("Finnhub")
     except: pass
 
-    # --- Tiingo ---
     try:
         tiingo = safe_request(f"https://api.tiingo.com/tiingo/daily/{ticker.replace('.AX','')}/fundamentals?token={TIINGO_KEY}")
         latest = tiingo.get("statementData", {}).get("latest", {})
@@ -120,7 +117,6 @@ def fetch_stock_data(ticker):
             data["Source"].append("Tiingo")
     except: pass
 
-    # --- Alpha Vantage ---
     try:
         ov = safe_request(f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={ALPHA_KEY}")
         quote = safe_request(f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={ALPHA_KEY}")
@@ -165,13 +161,13 @@ features = features.fillna(features.mean())
 normalized = MinMaxScaler().fit_transform(features)
 df["Score"] = (normalized.mean(axis=1) * 100).round(2)
 
-# --- Sector Diversification ---
+# --- Sector Penalty (Optional) ---
 if avoid_sector_overload:
     sector_avg = df["Sector"].value_counts(normalize=True)
     sector_penalty = sector_avg * 0.2
     df["Score"] = df.apply(lambda r: r["Score"] * (1 - sector_penalty.get(r["Sector"], 0)), axis=1)
 
-# --- Buy Signal Filtering ---
+# --- Buy Signal Filter ---
 buy_df = df[df["Score"] >= 40].copy()
 buy_df = buy_df.sort_values("Score", ascending=False)
 total_score = buy_df["Score"].sum()
@@ -180,7 +176,7 @@ buy_df["Allocation %"] = buy_df["Score"] / total_score
 buy_df["Investment ($)"] = (buy_df["Allocation %"] * investment_amount).round(2)
 buy_df["Est. Shares"] = (buy_df["Investment ($)"] / buy_df["Price"]).fillna(0).astype(int)
 
-# --- Buy Display ---
+# --- Buy Signals ---
 st.subheader("Buy Signals")
 if not buy_df.empty:
     st.dataframe(buy_df[["Ticker", "Name", "Score", "Price", "Investment ($)", "Est. Shares", "Sector", "Source"]])
@@ -188,7 +184,7 @@ if not buy_df.empty:
 else:
     st.warning("No qualifying stocks at this time.")
 
-# --- Watchlist View ---
+# --- Watchlist (Optional) ---
 if show_watchlist:
     st.subheader("Watchlist / Manual Compare")
     watchlist = df[df["Score"] < 40]
@@ -212,14 +208,14 @@ def get_price_history(ticker, period):
 
 price_data = {}
 for t in buy_df["Ticker"]:
-    series = get_price_history(t, period=range_choice)
-    if series is not None:
-        price_data[t] = series
+    history = get_price_history(t, period=range_choice)
+    if history is not None:
+        price_data[t] = history
 
 if price_data:
     st.line_chart(pd.DataFrame(price_data))
 else:
-    st.warning("No historical price data available.")
+    st.warning("No historical price data available. Check internet access or try again later.")
 
 # --- Rebalance Tool ---
 st.subheader("Rebalance Plan")
@@ -257,7 +253,7 @@ df_growth = pd.DataFrame(history, columns=["Year", "Projected Wealth ($)"])
 st.line_chart(df_growth.set_index("Year"))
 st.success(f"Projected portfolio in {years} years: ${df_growth.iloc[-1]['Projected Wealth ($)']:,.2f}")
 
-# --- News Feed ---
+# --- News Display (Cleaned) ---
 st.subheader("Latest News by Stock")
 for _, row in buy_df.iterrows():
     with st.expander(f"{row['Ticker']} News"):
